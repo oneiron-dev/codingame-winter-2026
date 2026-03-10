@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{java_random::JavaRandom, Coord, Direction, GameState, Grid, TileType};
+use crate::{java_random::JavaRandom, Coord, GameState, Grid, TileType};
 
 pub const MIN_GRID_HEIGHT: i32 = 10;
 pub const MAX_GRID_HEIGHT: i32 = 24;
@@ -233,7 +233,7 @@ pub fn initial_state_from_seed(seed: i64, league_level: i32) -> GameState {
                     .map(|coord| state.grid.opposite(coord))
                     .collect::<Vec<_>>();
             }
-            state.add_bird(next_bird_id, owner, body, Some(Direction::North));
+            state.add_bird(next_bird_id, owner, body, None);
             next_bird_id += 1;
         }
     }

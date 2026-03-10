@@ -219,6 +219,7 @@ impl GameState {
 
     pub fn step(&mut self, p0: &PlayerAction, p1: &PlayerAction) -> StepResult {
         self.turn += 1;
+        self.reset_turn_state();
         self.apply_moves(p0, p1);
         self.apply_eats();
         self.apply_beheadings();
@@ -230,6 +231,12 @@ impl GameState {
             game_over: self.is_game_over(),
             body_scores,
             final_scores,
+        }
+    }
+
+    fn reset_turn_state(&mut self) {
+        for bird in self.live_birds_mut() {
+            bird.direction = None;
         }
     }
 
@@ -622,5 +629,55 @@ mod tests {
         let result = state.step(&PlayerAction::default(), &PlayerAction::default());
         assert_eq!(result.body_scores[0], result.body_scores[1]);
         assert!(result.final_scores[0] > result.final_scores[1]);
+    }
+
+    #[test]
+    fn turn_direction_resets_to_facing_each_turn() {
+        let mut grid = Grid::new(8, 8);
+        for x in 0..8 {
+            grid.set(Coord::new(x, 7), TileType::Wall);
+        }
+        grid.set(Coord::new(2, 5), TileType::Wall);
+        grid.set(Coord::new(4, 5), TileType::Wall);
+        grid.apples.push(Coord::new(3, 2));
+        let mut state = GameState::new(grid);
+        state.add_bird(
+            0,
+            0,
+            vec![Coord::new(2, 2), Coord::new(2, 3), Coord::new(2, 4)],
+            None,
+        );
+        state.add_bird(
+            1,
+            1,
+            vec![Coord::new(4, 2), Coord::new(4, 3), Coord::new(4, 4)],
+            None,
+        );
+
+        state.step(
+            &action(&[(0, BirdCommand::Turn(Direction::East))]),
+            &action(&[(1, BirdCommand::Turn(Direction::West))]),
+        );
+
+        assert_eq!(
+            state.birds[0].body.iter().copied().collect::<Vec<_>>(),
+            vec![Coord::new(2, 2), Coord::new(2, 3), Coord::new(2, 4)]
+        );
+        assert_eq!(
+            state.birds[1].body.iter().copied().collect::<Vec<_>>(),
+            vec![Coord::new(4, 2), Coord::new(4, 3), Coord::new(4, 4)]
+        );
+
+        state.step(&PlayerAction::default(), &PlayerAction::default());
+
+        assert_eq!(
+            state.birds[0].body.iter().copied().collect::<Vec<_>>(),
+            vec![Coord::new(2, 2), Coord::new(2, 3), Coord::new(2, 4)]
+        );
+        assert_eq!(
+            state.birds[1].body.iter().copied().collect::<Vec<_>>(),
+            vec![Coord::new(4, 2), Coord::new(4, 3), Coord::new(4, 4)]
+        );
+        assert_eq!(state.losses, [1, 1]);
     }
 }
