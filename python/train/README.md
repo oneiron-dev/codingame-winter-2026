@@ -66,6 +66,26 @@ Notes:
 - The exporter writes owner-relative samples for both players on each turn.
 - The current tensor shape is `8 x 23 x 42` with `6` scalar features.
 
+## Parallel local pipeline
+
+Use the local M4 Max for CPU-parallel self-play generation, then train on `mps`:
+
+```bash
+python -m python.train.parallel_selfplay \
+  --seed-count 512 \
+  --workers 8 \
+  --games 512 \
+  --max-turns 120 \
+  --search-ms 2 \
+  --train
+```
+
+Notes:
+
+- The script builds the Java oracle once, builds the Rust exporter once, then shards self-play across `--workers`.
+- Shards are written under `python/train/data/<dataset>_shards/` and merged into the final dataset path.
+- Training stays mostly single-run on `mps`; parallelism is intended for map dumping and self-play export.
+
 ## Notes
 
 - PyTorch will prefer `mps` on Apple Silicon when available.

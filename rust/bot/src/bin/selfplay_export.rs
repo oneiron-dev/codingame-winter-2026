@@ -13,6 +13,8 @@ struct ExportConfig {
     limit: usize,
     max_turns: usize,
     search_time_ms: u64,
+    shard_index: usize,
+    num_shards: usize,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -22,7 +24,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut emitted = 0_usize;
     let mut games = 0_usize;
 
-    for record in records.into_iter().take(config.limit) {
+    for (index, record) in records.into_iter().enumerate() {
+        if index >= config.limit {
+            break;
+        }
+        if index % config.num_shards != config.shard_index {
+            continue;
+        }
         let rows = play_and_collect(
             record.state.to_game_state(),
             SelfPlayConfig {
@@ -52,6 +60,8 @@ fn parse_args() -> Result<ExportConfig, Box<dyn Error>> {
     let mut limit = usize::MAX;
     let mut max_turns = 200;
     let mut search_time_ms = 0_u64;
+    let mut shard_index = 0_usize;
+    let mut num_shards = 1_usize;
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
@@ -63,8 +73,21 @@ fn parse_args() -> Result<ExportConfig, Box<dyn Error>> {
             "--search-ms" => {
                 search_time_ms = args.next().ok_or("missing value for --search-ms")?.parse()?
             }
+            "--shard-index" => {
+                shard_index = args.next().ok_or("missing value for --shard-index")?.parse()?
+            }
+            "--num-shards" => {
+                num_shards = args.next().ok_or("missing value for --num-shards")?.parse()?
+            }
             _ => return Err(format!("unknown arg: {arg}").into()),
         }
+    }
+
+    if num_shards == 0 {
+        return Err("num shards must be positive".into());
+    }
+    if shard_index >= num_shards {
+        return Err(format!("shard index {shard_index} out of range for {num_shards} shards").into());
     }
 
     Ok(ExportConfig {
@@ -73,5 +96,7 @@ fn parse_args() -> Result<ExportConfig, Box<dyn Error>> {
         limit,
         max_turns,
         search_time_ms,
+        shard_index,
+        num_shards,
     })
 }
