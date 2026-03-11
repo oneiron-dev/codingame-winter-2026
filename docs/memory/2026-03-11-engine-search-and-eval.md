@@ -114,6 +114,47 @@ Short checks that passed after the behavior-hash/timing split landed:
 - Java smoke on boss + mirror matches: passed with zero reported runner error counts
 - small staged sweep smoke run: stage-1 wrote `screening` results only, stage-2 ran authoritative heldout/shadow evaluation, and the sweep reused one prebuilt release `arena` binary for the full run
 
+## Latest confirmation results
+
+After the interrupted sweep produced an apparently accepted `tmy4/topp4/cmy5/copp5` family winner, that family was rerun cleanly on full `heldout_v1 + shadow_v1 + Java smoke`:
+
+- `sweep_tmy4_topp4_cmy5_copp5_lat40_lat38`
+  - heldout body diff `-0.830078125`
+  - shadow body diff `+6.783203125`
+  - later-turn `p99` `33 ms`
+  - Java smoke passed
+  - final result: rejected
+- `sweep_tmy4_topp4_cmy5_copp5_lat40`
+  - heldout body diff `-0.716796875`
+  - shadow body diff `+6.970703125`
+  - later-turn `p99` `33 ms`
+  - Java smoke passed
+  - final result: rejected
+- `sweep_tmy4_topp4_cmy5_copp5_lat40_lat42`
+  - heldout body diff `-0.642578125`
+  - shadow body diff `+6.994140625`
+  - later-turn `p99` `37 ms`
+  - Java smoke passed
+  - final result: rejected
+
+Interpretation:
+
+- this topology family is healthy and clearly stronger than the weak anchor
+- timing and live-path correctness are fine
+- but none of the three variants beat the current incumbent on heldout
+- so no promotion was made from that family
+
+The highest-signal next search action is to confirm other distinct finalists from the interrupted sweep rather than rerunning the same family or promoting on the earlier partial result.
+
+## Live benchmark note
+
+The submitted bot was also reported at:
+
+- global rank `168 / 1108`
+- Bronze rank `168 / 1108`
+
+That is a useful sanity check that the incumbent/base is already a real competitive baseline, not just a locally overfit config.
+
 ## Still intentionally basic
 
 - No TT yet

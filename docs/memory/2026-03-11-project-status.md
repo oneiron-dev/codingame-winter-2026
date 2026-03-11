@@ -22,7 +22,8 @@ The newest local commits after the original simulator/bot work are:
 - `43d7d1c` `Add arena evaluation and deterministic search upgrades`
 - `0eec4d7` `Tighten evaluation hashes and arena timing gates`
 - `e93927b` `Add staged search sweep and regression fixtures`
-- plus the current uncommitted follow-up for stage-1 screening status and sweep arena-build reuse
+- `be7cb69` `Fix sweep screening status and arena build reuse`
+- `c6aa257` `Add flattened submission generator and artifact`
 
 The most important current checks that passed are:
 
@@ -79,12 +80,22 @@ Detailed follow-up docs:
 - Stage-1 sweep runs are now explicitly `screening`, not `accepted`/`rejected`, and the sweep reuses one prebuilt release `arena` binary instead of rebuilding it per candidate.
 - Self-play now defaults to Rust-generated seeds, records explicit budget type/value plus both config hashes, and can train directly from shard directories without mandatory merging.
 - The repo now also includes `tools/generate_flattened_submission.py`, which emits the pasteable `submission/flattened_main.rs` artifact and should be rerun after live bot/config changes.
+- A clean rerun of the first apparently winning `tmy4/topp4/cmy5/copp5` finalist family did not hold up on authoritative confirmation. The `lat38`, `lat40`, and `lat42` variants all passed Java smoke and easily beat the weak anchor, but all three still lost to the current incumbent on `heldout_v1`, so no promotion happened.
+
+## Latest Evaluation Read
+
+- Current live CodinGame result reported from the submitted bot: global rank `168 / 1108`, Bronze rank `168 / 1108`
+- Clean authoritative confirmations run after the interrupted sweep:
+  - `sweep_tmy4_topp4_cmy5_copp5_lat40_lat38`: rejected, heldout body diff `-0.830078125`
+  - `sweep_tmy4_topp4_cmy5_copp5_lat40`: rejected, heldout body diff `-0.716796875`
+  - `sweep_tmy4_topp4_cmy5_copp5_lat40_lat42`: rejected, heldout body diff `-0.642578125`
+- Conclusion: the current incumbent remains the real baseline; the next useful confirmations should be other distinct finalists such as the `tmy6/topp8/...` cluster rather than promoting the first interrupted-sweep winner.
 
 ## Recommended Next Read
 
 - Read [2026-03-11 Engine, Search, and Evaluation Harness](./2026-03-11-engine-search-and-eval.md) if you need to work on live strength or referee parity.
 - Read [2026-03-11 Training and Data Pipeline](./2026-03-11-training-and-data-pipeline.md) if you need to work on export, datasets, or model training.
-- The immediate next operational step is a real full-suite sweep followed by the first true promotion into `submission_current.json` and `incumbent_current.json`.
+- The immediate next operational step is to confirm one or two of the other strong `first_full_sweep_v2` finalists, especially the `tmy6/topp8/...` region, before running any new broad sweep or considering promotion.
 
 ## Notes
 
