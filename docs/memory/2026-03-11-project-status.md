@@ -16,6 +16,7 @@ The repository now has:
 - a staged release-mode search sweep helper with smoke filtering and heldout/shadow finalist evaluation
 - stage-1 sweep screening that no longer pollutes authoritative acceptance results
 - a generated single-file submission artifact at `submission/flattened_main.rs`
+- a first true promoted winner: `submission_current.json` is now the breadth-heavier `6/8/3/3` finalist, while `incumbent_current.json` preserves the prior `6/6/4/4` baseline
 
 The newest local commits after the original simulator/bot work are:
 
@@ -81,6 +82,7 @@ Detailed follow-up docs:
 - Self-play now defaults to Rust-generated seeds, records explicit budget type/value plus both config hashes, and can train directly from shard directories without mandatory merging.
 - The repo now also includes `tools/generate_flattened_submission.py`, which emits the pasteable `submission/flattened_main.rs` artifact and should be rerun after live bot/config changes.
 - A clean rerun of the first apparently winning `tmy4/topp4/cmy5/copp5` finalist family did not hold up on authoritative confirmation. The `lat38`, `lat40`, and `lat42` variants all passed Java smoke and easily beat the weak anchor, but all three still lost to the current incumbent on `heldout_v1`, so no promotion happened.
+- The next distinct `tmy6/topp8` finalist family did produce a real winner. `sweep_tmy6_topp8_cmy3_copp3_lat40` was accepted on authoritative rerun and promoted into `submission_current.json`.
 
 ## Latest Evaluation Read
 
@@ -89,13 +91,17 @@ Detailed follow-up docs:
   - `sweep_tmy4_topp4_cmy5_copp5_lat40_lat38`: rejected, heldout body diff `-0.830078125`
   - `sweep_tmy4_topp4_cmy5_copp5_lat40`: rejected, heldout body diff `-0.716796875`
   - `sweep_tmy4_topp4_cmy5_copp5_lat40_lat42`: rejected, heldout body diff `-0.642578125`
-- Conclusion: the current incumbent remains the real baseline; the next useful confirmations should be other distinct finalists such as the `tmy6/topp8/...` cluster rather than promoting the first interrupted-sweep winner.
+- Clean authoritative confirmations run for the next `tmy6/topp8` finalists:
+  - `sweep_tmy6_topp8_cmy3_copp3_lat40`: accepted, heldout body diff `+0.08984375`, heldout win margin `0.0`, shadow body diff `+9.33203125`, later-turn `p99` `41 ms`
+  - `sweep_tmy6_topp8_cmy3_copp4_lat40`: rejected, heldout body diff `-0.435546875`, later-turn `p99` `62 ms`
+  - `sweep_tmy6_topp8_cmy5_copp5_lat40`: rejected, heldout body diff `+0.7109375`, later-turn `p99` `62 ms`
+- Conclusion: the first true promotion has now happened. `submission_current.json` is the promoted `6/8/3/3` breadth-heavy winner, and `incumbent_current.json` remains the old `6/6/4/4` baseline for future comparisons.
 
 ## Recommended Next Read
 
 - Read [2026-03-11 Engine, Search, and Evaluation Harness](./2026-03-11-engine-search-and-eval.md) if you need to work on live strength or referee parity.
 - Read [2026-03-11 Training and Data Pipeline](./2026-03-11-training-and-data-pipeline.md) if you need to work on export, datasets, or model training.
-- The immediate next operational step is to confirm one or two of the other strong `first_full_sweep_v2` finalists, especially the `tmy6/topp8/...` region, before running any new broad sweep or considering promotion.
+- The immediate next operational step is to submit the promoted config, monitor live rank movement, and only then decide whether to run a narrower follow-up sweep or reopen self-play quality work.
 
 ## Notes
 

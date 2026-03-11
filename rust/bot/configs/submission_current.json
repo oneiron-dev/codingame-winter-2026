@@ -14,9 +14,9 @@
     "first_turn_ms": 850,
     "later_turn_ms": 40,
     "deepen_top_my": 6,
-    "deepen_top_opp": 6,
-    "deepen_child_my": 4,
-    "deepen_child_opp": 4,
+    "deepen_top_opp": 8,
+    "deepen_child_my": 3,
+    "deepen_child_opp": 3,
     "extra_nodes_after_root": 5000
   }
 }

@@ -160,4 +160,35 @@ That is a useful sanity check that the incumbent/base is already a real competit
 - No TT yet
 - No policy prior or network-guided search yet
 - Current arena acceptance logic is still simple body-diff/WDL based, not a full Elo framework
-- `incumbent_current.json` is still intentionally behavior-identical to `submission_current.json` until the first real sweep winner is promoted
+- `submission_current.json` is now the first promoted winner from the sweep process, with a breadth-heavier `6/8/3/3` search shape
+- `incumbent_current.json` now preserves the prior `6/6/4/4` baseline for future authoritative comparisons
+
+## First real promotion
+
+The next distinct `tmy6/topp8` finalist confirmations produced the first true promoted winner.
+
+- `sweep_tmy6_topp8_cmy3_copp3_lat40`
+  - heldout body diff `+0.08984375`
+  - heldout win margin `0.0`
+  - shadow body diff `+9.33203125`
+  - later-turn `p99` `41 ms`
+  - Java smoke passed
+  - final result: accepted and promoted
+- `sweep_tmy6_topp8_cmy3_copp4_lat40`
+  - heldout body diff `-0.435546875`
+  - shadow body diff `+7.76953125`
+  - later-turn `p99` `62 ms`
+  - Java smoke passed
+  - final result: rejected on heldout and timing
+- `sweep_tmy6_topp8_cmy5_copp5_lat40`
+  - heldout body diff `+0.7109375`
+  - shadow body diff `+9.130859375`
+  - later-turn `p99` `62 ms`
+  - Java smoke passed
+  - final result: rejected on timing despite positive heldout score
+
+Interpretation:
+
+- the winning move was not “more child depth”; it was broader root/opponent coverage with shallower child follow-ups
+- two nearby finalists had stronger raw heldout body diff but failed the later-turn time gate badly, so they were not promotable
+- the promoted winner is the first search config that is both stronger than the prior incumbent and still safe under the current acceptance contract

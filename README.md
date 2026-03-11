@@ -10,6 +10,7 @@ Current status:
 - Java-referee smoke canary that validates the built candidate artifact and behavior hashes
 - staged release-mode search sweep helper with smoke filtering and heldout/shadow finalist evaluation
 - deterministic self-play export and local Python value-training pipeline
+- current promoted submission uses a breadth-heavier `6/8/3/3` search shape, while `incumbent_current.json` preserves the prior `6/6/4/4` baseline
 
 ## Repository layout
 
