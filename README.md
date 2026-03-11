@@ -7,7 +7,7 @@ Current status:
 - Java-parity Rust simulator
 - Rust contest bot with embedded submission config and corrected depth-2 refinement
 - release-mode Rust arena harness with frozen seed suites
-- Java-referee smoke canary that validates the built candidate artifact hash
+- Java-referee smoke canary that validates the built candidate artifact and behavior hashes
 - deterministic self-play export and local Python value-training pipeline
 
 ## Repository layout
@@ -49,6 +49,8 @@ python3 -m python.train.run_arena \
   --incumbent-config rust/bot/configs/incumbent_current.json \
   --anchor-config rust/bot/configs/anchor_root_only.json
 ```
+
+If the candidate is behavior-identical to the incumbent, `run_arena` now returns an informational no-op instead of treating it as a meaningful self-match.
 
 ## Self-play and training
 

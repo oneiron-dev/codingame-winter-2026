@@ -37,6 +37,13 @@ The Rust search path now has:
 
 The live bot no longer relies on an in-code default config for submission behavior. It now embeds a build-time config artifact, with `submission_current.json` as the default source and an override path for local candidate promotion runs.
 
+Config identity is now split in two:
+
+- artifact hash: raw file bytes, used for build provenance and Java smoke verification
+- behavior hash: canonicalized `eval + search`, used for arena equality checks and promotion logic
+
+This prevents renamed-but-identical configs from quietly masquerading as distinct strategies.
+
 The current implementation intentionally does **not** include a transposition table yet. The current order of work is:
 
 1. ordering
@@ -55,7 +62,7 @@ It:
 - runs two configs against each other in-process
 - swaps seats automatically
 - parallelizes across seeds
-- reports average body diff, W/D/L, tiebreak win rate, average turns, node counts, move-time percentiles, and both config hashes
+- reports average body diff, W/D/L, tiebreak win rate, average turns, node counts, opening-move timing, later-turn timing, and both artifact/behavior hashes
 
 Frozen committed suites:
 
@@ -76,13 +83,13 @@ The canary runs the real compiled Rust bot through the actual referee runner and
 SNAKEBOT_STRICT_RECONCILE=1
 ```
 
-It now also verifies that the built bot artifact embeds the same candidate config hash that the arena evaluation used.
+It now also verifies that the built bot artifact embeds the same candidate artifact and behavior hashes that the arena evaluation used.
 
 ## Recent runtime checks
 
-Short checks that passed after the arena/smoke work landed:
+Short checks that passed after the behavior-hash/timing split landed:
 
-- tiny 2-seed release-mode arena run: same-config draw, `p99` move time around `15-17 ms`
+- tiny 2-seed release-mode arena run against the root-only anchor: later-turn `p99` around `31 ms`
 - Java smoke on boss + mirror matches: passed with zero reported runner error counts
 
 ## Still intentionally basic
@@ -90,3 +97,4 @@ Short checks that passed after the arena/smoke work landed:
 - No TT yet
 - No policy prior or network-guided search yet
 - Current arena acceptance logic is still simple body-diff/WDL based, not a full Elo framework
+- `incumbent_current.json` is still intentionally behavior-identical to `submission_current.json` until the first real sweep winner is promoted

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+CURRENT_ACCEPTANCE_VERSION = 3
 
 WEIGHTS = {
     "heldout_body_diff": 0.45,
@@ -16,7 +17,7 @@ WEIGHTS = {
 }
 
 GATES = {
-    "turn_p99_ms_max": 45.0,
+    "later_turn_p99_ms_max": 45.0,
     "validation_mae_max": 0.75,
 }
 
@@ -70,6 +71,14 @@ def ensure_schema(path: str | Path) -> None:
             conn.execute(
                 "ALTER TABLE experiments ADD COLUMN acceptance_version INTEGER NOT NULL DEFAULT 1"
             )
+        conn.execute(
+            """
+            UPDATE experiments
+            SET status = 'legacy'
+            WHERE status = 'accepted' AND acceptance_version < ?
+            """,
+            (CURRENT_ACCEPTANCE_VERSION,),
+        )
 
 
 def append_result(
@@ -80,7 +89,7 @@ def append_result(
     description: str,
     metrics: dict[str, Any],
     failures: list[str],
-    acceptance_version: int = 1,
+    acceptance_version: int = CURRENT_ACCEPTANCE_VERSION,
 ) -> None:
     ensure_schema(path)
     with sqlite3.connect(path) as conn:

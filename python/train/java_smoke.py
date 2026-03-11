@@ -37,8 +37,18 @@ def stable_hash_bytes(data: bytes) -> str:
     return f"{value:016x}"
 
 
-def config_hash(path: Path) -> str:
+def artifact_hash(path: Path) -> str:
     return stable_hash_bytes(path.read_bytes())
+
+
+def behavior_hash(path: Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    canonical = {
+        "eval": payload["eval"],
+        "search": payload["search"],
+    }
+    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return stable_hash_bytes(raw)
 
 
 def build_release_bot(config_path: Path) -> tuple[Path, dict]:
@@ -69,11 +79,17 @@ def build_release_bot(config_path: Path) -> tuple[Path, dict]:
             text=True,
         )
     )
-    expected_hash = config_hash(config_path)
-    if info["config_hash"] != expected_hash:
+    expected_artifact_hash = artifact_hash(config_path)
+    expected_behavior_hash = behavior_hash(config_path)
+    if info["artifact_hash"] != expected_artifact_hash:
         raise RuntimeError(
-            "embedded config hash mismatch: "
-            f"expected {expected_hash}, got {info['config_hash']}"
+            "embedded config artifact hash mismatch: "
+            f"expected {expected_artifact_hash}, got {info['artifact_hash']}"
+        )
+    if info["behavior_hash"] != expected_behavior_hash:
+        raise RuntimeError(
+            "embedded config behavior hash mismatch: "
+            f"expected {expected_behavior_hash}, got {info['behavior_hash']}"
         )
     return REPO_ROOT / "target/release/snakebot-bot", info
 
@@ -124,8 +140,10 @@ def run_java_smoke(
     return {
         "league": league,
         "candidate_config": str(candidate_config),
-        "candidate_config_hash": config_hash(candidate_config),
-        "embedded_config_hash": embedded["config_hash"],
+        "candidate_config_artifact_hash": artifact_hash(candidate_config),
+        "candidate_config_behavior_hash": behavior_hash(candidate_config),
+        "embedded_config_artifact_hash": embedded["artifact_hash"],
+        "embedded_config_behavior_hash": embedded["behavior_hash"],
         "embedded_config_name": embedded["name"],
         "matches": len(matches),
         "passed": not failed,

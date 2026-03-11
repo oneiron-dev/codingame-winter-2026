@@ -17,7 +17,8 @@ pub struct EncodedPosition {
 pub struct TrainingRow {
     pub schema_version: u32,
     pub git_sha: String,
-    pub config_hash: String,
+    pub config_artifact_hash: String,
+    pub config_behavior_hash: String,
     pub seed: i64,
     pub game_id: String,
     pub turn: i32,
@@ -43,7 +44,8 @@ pub struct TrainingRow {
 pub struct TrainingMetadata {
     pub schema_version: u32,
     pub git_sha: String,
-    pub config_hash: String,
+    pub config_artifact_hash: String,
+    pub config_behavior_hash: String,
     pub seed: i64,
     pub game_id: String,
     pub turn: i32,
@@ -116,7 +118,8 @@ pub fn encode_training_row(
     TrainingRow {
         schema_version: metadata.schema_version,
         git_sha: metadata.git_sha,
-        config_hash: metadata.config_hash,
+        config_artifact_hash: metadata.config_artifact_hash,
+        config_behavior_hash: metadata.config_behavior_hash,
         seed: metadata.seed,
         game_id: metadata.game_id,
         turn: metadata.turn,

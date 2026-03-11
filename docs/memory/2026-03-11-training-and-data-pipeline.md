@@ -25,7 +25,8 @@ Important fields:
 
 - schema version
 - git SHA
-- config hash
+- config artifact hash
+- config behavior hash
 - seed
 - game id
 - turn
@@ -43,6 +44,7 @@ This is meant to support:
 - grouped splits
 - dedup checks
 - later policy distillation
+- cleaner separation between build provenance and strategy identity
 
 ## Training split and dedup
 
@@ -60,7 +62,7 @@ This is a guard against the earlier leakage issue where validation rows duplicat
 
 - training-only runs are `informational`
 - arena plus Java smoke is the acceptance gate
-- acceptance semantics are now versioned so older pre-arena rows can be distinguished from current promotion runs
+- acceptance semantics are now versioned so older accepted rows can be migrated to `legacy` when the arena gate meaning changes
 
 Wrapper scripts:
 

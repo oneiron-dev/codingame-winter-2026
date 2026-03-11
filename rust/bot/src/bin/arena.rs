@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use rayon::prelude::*;
 use serde::Serialize;
-use snakebot_bot::config::{hash_config_file, BotConfig};
+use snakebot_bot::config::{artifact_hash_file, behavior_hash_file, BotConfig};
 use snakebot_bot::search::{choose_action, live_budget_for_turn};
 use snakebot_engine::initial_state_from_seed;
 
@@ -13,8 +13,10 @@ use snakebot_engine::initial_state_from_seed;
 struct ArenaConfig {
     bot_a: BotConfig,
     bot_b: BotConfig,
-    bot_a_hash: String,
-    bot_b_hash: String,
+    bot_a_artifact_hash: String,
+    bot_b_artifact_hash: String,
+    bot_a_behavior_hash: String,
+    bot_b_behavior_hash: String,
     suite_path: PathBuf,
     league: i32,
     jobs: usize,
@@ -34,8 +36,10 @@ struct MatchSummary {
     winner_a: Option<bool>,
     tiebreak_win_a: bool,
     turns: i32,
-    p0_elapsed_ms: Vec<u64>,
-    p1_elapsed_ms: Vec<u64>,
+    p0_opening_elapsed_ms: Option<u64>,
+    p1_opening_elapsed_ms: Option<u64>,
+    p0_later_elapsed_ms: Vec<u64>,
+    p1_later_elapsed_ms: Vec<u64>,
     p0_nodes: Vec<u64>,
     p1_nodes: Vec<u64>,
 }
@@ -43,9 +47,11 @@ struct MatchSummary {
 #[derive(Serialize)]
 struct SideMetrics {
     avg_nodes_per_move: f64,
-    move_time_p50_ms: f64,
-    move_time_p95_ms: f64,
-    move_time_p99_ms: f64,
+    opening_move_max_ms: f64,
+    opening_move_p95_ms: f64,
+    later_move_p50_ms: f64,
+    later_move_p95_ms: f64,
+    later_move_p99_ms: f64,
 }
 
 #[derive(Serialize)]
@@ -57,8 +63,10 @@ struct ArenaSummary {
     matches: usize,
     bot_a_name: String,
     bot_b_name: String,
-    bot_a_config_hash: String,
-    bot_b_config_hash: String,
+    bot_a_artifact_hash: String,
+    bot_b_artifact_hash: String,
+    bot_a_behavior_hash: String,
+    bot_b_behavior_hash: String,
     average_body_diff: f64,
     wins: usize,
     draws: usize,
@@ -105,8 +113,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn parse_args() -> Result<ArenaConfig, Box<dyn Error>> {
     let mut bot_a = BotConfig::embedded();
     let mut bot_b = BotConfig::embedded();
-    let mut bot_a_hash = BotConfig::embedded_hash().to_owned();
-    let mut bot_b_hash = BotConfig::embedded_hash().to_owned();
+    let mut bot_a_artifact_hash = BotConfig::embedded_artifact_hash().to_owned();
+    let mut bot_b_artifact_hash = BotConfig::embedded_artifact_hash().to_owned();
+    let mut bot_a_behavior_hash = BotConfig::embedded_behavior_hash().to_owned();
+    let mut bot_b_behavior_hash = BotConfig::embedded_behavior_hash().to_owned();
     let mut suite_path = None;
     let mut league = 4_i32;
     let mut jobs = std::thread::available_parallelism()
@@ -119,12 +129,14 @@ fn parse_args() -> Result<ArenaConfig, Box<dyn Error>> {
         match arg.as_str() {
             "--bot-a-config" => {
                 let path = args.next().ok_or("missing value for --bot-a-config")?;
-                bot_a_hash = hash_config_file(&path)?;
+                bot_a_artifact_hash = artifact_hash_file(&path)?;
+                bot_a_behavior_hash = behavior_hash_file(&path)?;
                 bot_a = BotConfig::load(path)?
             }
             "--bot-b-config" => {
                 let path = args.next().ok_or("missing value for --bot-b-config")?;
-                bot_b_hash = hash_config_file(&path)?;
+                bot_b_artifact_hash = artifact_hash_file(&path)?;
+                bot_b_behavior_hash = behavior_hash_file(&path)?;
                 bot_b = BotConfig::load(path)?
             }
             "--suite" => {
@@ -147,8 +159,10 @@ fn parse_args() -> Result<ArenaConfig, Box<dyn Error>> {
     Ok(ArenaConfig {
         bot_a,
         bot_b,
-        bot_a_hash,
-        bot_b_hash,
+        bot_a_artifact_hash,
+        bot_b_artifact_hash,
+        bot_a_behavior_hash,
+        bot_b_behavior_hash,
         suite_path: suite_path.ok_or("missing required --suite")?,
         league,
         jobs: jobs.max(1),
@@ -174,12 +188,15 @@ fn load_suite(path: &PathBuf) -> Result<Vec<i64>, Box<dyn Error>> {
 
 fn run_match(config: &ArenaConfig, task: &MatchTask) -> MatchSummary {
     let mut state = initial_state_from_seed(task.seed, config.league);
-    let mut p0_elapsed_ms = Vec::new();
-    let mut p1_elapsed_ms = Vec::new();
+    let mut p0_opening_elapsed_ms = None;
+    let mut p1_opening_elapsed_ms = None;
+    let mut p0_later_elapsed_ms = Vec::new();
+    let mut p1_later_elapsed_ms = Vec::new();
     let mut p0_nodes = Vec::new();
     let mut p1_nodes = Vec::new();
 
     while !state.is_terminal(config.max_turns) {
+        let turn = state.turn;
         let p0_config = if task.bot_a_is_player_zero {
             &config.bot_a
         } else {
@@ -203,8 +220,13 @@ fn run_match(config: &ArenaConfig, task: &MatchTask) -> MatchSummary {
             p1_config,
             live_budget_for_turn(p1_config, state.turn),
         );
-        p0_elapsed_ms.push(p0.stats.elapsed_ms);
-        p1_elapsed_ms.push(p1.stats.elapsed_ms);
+        if turn == 0 {
+            p0_opening_elapsed_ms = Some(p0.stats.elapsed_ms);
+            p1_opening_elapsed_ms = Some(p1.stats.elapsed_ms);
+        } else {
+            p0_later_elapsed_ms.push(p0.stats.elapsed_ms);
+            p1_later_elapsed_ms.push(p1.stats.elapsed_ms);
+        }
         p0_nodes.push(p0.stats.root_pairs + p0.stats.extra_nodes);
         p1_nodes.push(p1.stats.root_pairs + p1.stats.extra_nodes);
         state.step(&p0.action, &p1.action);
@@ -231,8 +253,10 @@ fn run_match(config: &ArenaConfig, task: &MatchTask) -> MatchSummary {
         winner_a,
         tiebreak_win_a,
         turns: state.turn,
-        p0_elapsed_ms,
-        p1_elapsed_ms,
+        p0_opening_elapsed_ms,
+        p1_opening_elapsed_ms,
+        p0_later_elapsed_ms,
+        p1_later_elapsed_ms,
         p0_nodes,
         p1_nodes,
     }
@@ -246,8 +270,10 @@ fn summarize(config: &ArenaConfig, matches: &[MatchSummary]) -> ArenaSummary {
     let mut tiebreak_wins = 0_usize;
     let mut total_body_diff = 0_i64;
     let mut total_turns = 0_i64;
-    let mut side_a_times = Vec::new();
-    let mut side_b_times = Vec::new();
+    let mut side_a_opening_times = Vec::new();
+    let mut side_b_opening_times = Vec::new();
+    let mut side_a_later_times = Vec::new();
+    let mut side_b_later_times = Vec::new();
     let mut side_a_nodes = Vec::new();
     let mut side_b_nodes = Vec::new();
 
@@ -267,13 +293,17 @@ fn summarize(config: &ArenaConfig, matches: &[MatchSummary]) -> ArenaSummary {
         }
 
         if summary.bot_a_is_player_zero {
-            side_a_times.extend(summary.p0_elapsed_ms.iter().map(|value| *value as f64));
-            side_b_times.extend(summary.p1_elapsed_ms.iter().map(|value| *value as f64));
+            side_a_opening_times.extend(summary.p0_opening_elapsed_ms.iter().map(|value| *value as f64));
+            side_b_opening_times.extend(summary.p1_opening_elapsed_ms.iter().map(|value| *value as f64));
+            side_a_later_times.extend(summary.p0_later_elapsed_ms.iter().map(|value| *value as f64));
+            side_b_later_times.extend(summary.p1_later_elapsed_ms.iter().map(|value| *value as f64));
             side_a_nodes.extend(summary.p0_nodes.iter().map(|value| *value as f64));
             side_b_nodes.extend(summary.p1_nodes.iter().map(|value| *value as f64));
         } else {
-            side_a_times.extend(summary.p1_elapsed_ms.iter().map(|value| *value as f64));
-            side_b_times.extend(summary.p0_elapsed_ms.iter().map(|value| *value as f64));
+            side_a_opening_times.extend(summary.p1_opening_elapsed_ms.iter().map(|value| *value as f64));
+            side_b_opening_times.extend(summary.p0_opening_elapsed_ms.iter().map(|value| *value as f64));
+            side_a_later_times.extend(summary.p1_later_elapsed_ms.iter().map(|value| *value as f64));
+            side_b_later_times.extend(summary.p0_later_elapsed_ms.iter().map(|value| *value as f64));
             side_a_nodes.extend(summary.p1_nodes.iter().map(|value| *value as f64));
             side_b_nodes.extend(summary.p0_nodes.iter().map(|value| *value as f64));
         }
@@ -292,8 +322,10 @@ fn summarize(config: &ArenaConfig, matches: &[MatchSummary]) -> ArenaSummary {
         matches: matches.len(),
         bot_a_name: config.bot_a.name.clone(),
         bot_b_name: config.bot_b.name.clone(),
-        bot_a_config_hash: config.bot_a_hash.clone(),
-        bot_b_config_hash: config.bot_b_hash.clone(),
+        bot_a_artifact_hash: config.bot_a_artifact_hash.clone(),
+        bot_b_artifact_hash: config.bot_b_artifact_hash.clone(),
+        bot_a_behavior_hash: config.bot_a_behavior_hash.clone(),
+        bot_b_behavior_hash: config.bot_b_behavior_hash.clone(),
         average_body_diff: total_body_diff as f64 / matches.len().max(1) as f64,
         wins,
         draws,
@@ -304,17 +336,19 @@ fn summarize(config: &ArenaConfig, matches: &[MatchSummary]) -> ArenaSummary {
             tiebreak_wins as f64 / tiebreak_opportunities as f64
         },
         average_turns: total_turns as f64 / matches.len().max(1) as f64,
-        side_a: build_side_metrics(&side_a_times, &side_a_nodes),
-        side_b: build_side_metrics(&side_b_times, &side_b_nodes),
+        side_a: build_side_metrics(&side_a_opening_times, &side_a_later_times, &side_a_nodes),
+        side_b: build_side_metrics(&side_b_opening_times, &side_b_later_times, &side_b_nodes),
     }
 }
 
-fn build_side_metrics(times: &[f64], nodes: &[f64]) -> SideMetrics {
+fn build_side_metrics(opening_times: &[f64], later_times: &[f64], nodes: &[f64]) -> SideMetrics {
     SideMetrics {
         avg_nodes_per_move: mean(nodes),
-        move_time_p50_ms: percentile(times, 0.50),
-        move_time_p95_ms: percentile(times, 0.95),
-        move_time_p99_ms: percentile(times, 0.99),
+        opening_move_max_ms: max_value(opening_times),
+        opening_move_p95_ms: percentile(opening_times, 0.95),
+        later_move_p50_ms: percentile(later_times, 0.50),
+        later_move_p95_ms: percentile(later_times, 0.95),
+        later_move_p99_ms: percentile(later_times, 0.99),
     }
 }
 
@@ -323,6 +357,10 @@ fn mean(values: &[f64]) -> f64 {
         return 0.0;
     }
     values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn max_value(values: &[f64]) -> f64 {
+    values.iter().copied().max_by(|left, right| left.total_cmp(right)).unwrap_or(0.0)
 }
 
 fn percentile(values: &[f64], pct: f64) -> f64 {

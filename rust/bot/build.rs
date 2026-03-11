@@ -2,6 +2,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+use serde_json::{json, Value};
+
 fn main() {
     println!("cargo:rerun-if-env-changed=SNAKEBOT_CONFIG_PATH");
 
@@ -46,8 +48,12 @@ fn main() {
         config_path.display()
     );
     println!(
-        "cargo:rustc-env=SNAKEBOT_EMBEDDED_CONFIG_HASH={}",
+        "cargo:rustc-env=SNAKEBOT_EMBEDDED_CONFIG_ARTIFACT_HASH={}",
         hash_bytes(&raw)
+    );
+    println!(
+        "cargo:rustc-env=SNAKEBOT_EMBEDDED_CONFIG_BEHAVIOR_HASH={}",
+        behavior_hash(&raw)
     );
 }
 
@@ -58,4 +64,65 @@ fn hash_bytes(bytes: &[u8]) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
+}
+
+fn behavior_hash(raw: &[u8]) -> String {
+    let parsed: Value =
+        serde_json::from_slice(raw).expect("embedded config should be valid json for behavior hash");
+    let eval = parsed
+        .get("eval")
+        .cloned()
+        .expect("embedded config must contain eval");
+    let search = parsed
+        .get("search")
+        .cloned()
+        .expect("embedded config must contain search");
+    let canonical = json!({
+        "eval": eval,
+        "search": search,
+    });
+    let bytes = canonical_json_bytes(&canonical);
+    hash_bytes(&bytes)
+}
+
+fn canonical_json_bytes(value: &Value) -> Vec<u8> {
+    let mut out = String::new();
+    write_canonical_json(value, &mut out);
+    out.into_bytes()
+}
+
+fn write_canonical_json(value: &Value, out: &mut String) {
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+            out.push_str(
+                &serde_json::to_string(value).expect("scalar json value should serialize"),
+            );
+        }
+        Value::Array(values) => {
+            out.push('[');
+            for (idx, entry) in values.iter().enumerate() {
+                if idx > 0 {
+                    out.push(',');
+                }
+                write_canonical_json(entry, out);
+            }
+            out.push(']');
+        }
+        Value::Object(map) => {
+            out.push('{');
+            let mut keys = map.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            for (idx, key) in keys.iter().enumerate() {
+                if idx > 0 {
+                    out.push(',');
+                }
+                out.push_str(
+                    &serde_json::to_string(key).expect("json object key should serialize"),
+                );
+                out.push(':');
+                write_canonical_json(&map[key], out);
+            }
+            out.push('}');
+        }
+    }
 }

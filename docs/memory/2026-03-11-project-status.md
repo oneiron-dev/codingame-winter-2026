@@ -11,11 +11,14 @@ The repository now has:
 - a release-mode Rust arena harness with frozen seed suites
 - a real Java-referee smoke canary for live I/O/reconciliation checks on the exact built candidate artifact
 - a deterministic self-play/export path with Rust-generated seeds by default and a grouped Python value-training pipeline
+- semantic behavior hashes alongside raw artifact hashes for config identity and promotion logic
+- split opening/later-turn arena timing so only later turns are hard-gated
 
 The newest local commit after the original simulator/bot work is:
 
 - `43d7d1c` `Add arena evaluation and deterministic search upgrades`
 - plus the current uncommitted follow-up for search-fix/config-discipline cleanup
+- plus the current uncommitted follow-up for behavior-hash, timing-gate, and ledger cleanup
 
 The most important current checks that passed are:
 
@@ -60,8 +63,9 @@ Detailed follow-up docs:
 - Engine semantics are split cleanly: natural Java-parity `is_game_over()` stays separate from contest `is_terminal(200)` and `final_result(200)`.
 - Live search now uses an embedded submission config, while arena/self-play/training operate on explicit candidate/incumbent/anchor JSONs.
 - Depth-2 refinement now recomputes refined root worst/mean scores and exported root values instead of only downgrading branches.
-- Java smoke now rebuilds the candidate artifact, verifies the embedded config hash, and then runs the referee canary on that exact build.
-- Self-play now defaults to Rust-generated seeds, records explicit budget type/value, and can train directly from shard directories without mandatory merging.
+- Java smoke now rebuilds the candidate artifact, verifies the embedded artifact and behavior hashes, and then runs the referee canary on that exact build.
+- Arena now distinguishes raw artifact identity from semantic behavior identity, short-circuits behavior self-matches, and records opening/later timing buckets separately.
+- Self-play now defaults to Rust-generated seeds, records explicit budget type/value plus both config hashes, and can train directly from shard directories without mandatory merging.
 
 ## Recommended Next Read
 

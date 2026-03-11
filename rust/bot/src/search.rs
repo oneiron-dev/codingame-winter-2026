@@ -792,16 +792,22 @@ mod tests {
         shallow_config.search.deepen_child_opp = 0;
         shallow_config.search.extra_nodes_after_root = 0;
 
-        for seed in 1..=64 {
-            let state = initial_state_from_seed(seed, 4);
-            let shallow = choose_action(&state, 0, &shallow_config, SearchBudget::ExtraNodesAfterRoot(0));
-            let deep = choose_action(&state, 0, &deep_config, SearchBudget::ExtraNodesAfterRoot(256));
-            if shallow.action_id != deep.action_id {
-                assert_eq!(deep.root_values[deep.action_id], deep.score as f32);
-                return;
-            }
-        }
-
-        panic!("failed to find a seed where deepening changes the root choice");
+        let state = initial_state_from_seed(1, 4);
+        let shallow = choose_action(
+            &state,
+            0,
+            &shallow_config,
+            SearchBudget::ExtraNodesAfterRoot(0),
+        );
+        let deep = choose_action(
+            &state,
+            0,
+            &deep_config,
+            SearchBudget::ExtraNodesAfterRoot(256),
+        );
+        assert_eq!(shallow.action_id, 46);
+        assert_eq!(deep.action_id, 49);
+        assert_ne!(shallow.action_id, deep.action_id);
+        assert_eq!(deep.root_values[deep.action_id], deep.score as f32);
     }
 }

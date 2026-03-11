@@ -4,13 +4,13 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
-use snakebot_bot::config::{hash_config_file, BotConfig};
+use snakebot_bot::config::{artifact_hash_file, behavior_hash_file, BotConfig};
 use snakebot_bot::features::{encode_training_row, TrainingMetadata};
 use snakebot_bot::search::SearchBudget;
 use snakebot_bot::selfplay::{play_and_collect, SelfPlayConfig};
 use snakebot_engine::{initial_state_from_seed, load_dump_records};
 
-const DEFAULT_SCHEMA_VERSION: u32 = 2;
+const DEFAULT_SCHEMA_VERSION: u32 = 3;
 
 struct ExportConfig {
     maps_path: Option<PathBuf>,
@@ -25,7 +25,8 @@ struct ExportConfig {
     num_shards: usize,
     git_sha: String,
     bot_config: BotConfig,
-    config_hash: String,
+    config_artifact_hash: String,
+    config_behavior_hash: String,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -104,7 +105,8 @@ fn export_game(
             TrainingMetadata {
                 schema_version: DEFAULT_SCHEMA_VERSION,
                 git_sha: config.git_sha.clone(),
-                config_hash: config.config_hash.clone(),
+                config_artifact_hash: config.config_artifact_hash.clone(),
+                config_behavior_hash: config.config_behavior_hash.clone(),
                 seed,
                 game_id: game_id.clone(),
                 turn: position.turn,
@@ -136,7 +138,8 @@ fn parse_args() -> Result<ExportConfig, Box<dyn Error>> {
     let mut num_shards = 1_usize;
     let mut git_sha = "unknown".to_owned();
     let mut bot_config = BotConfig::embedded();
-    let mut config_hash = BotConfig::embedded_hash().to_owned();
+    let mut config_artifact_hash = BotConfig::embedded_artifact_hash().to_owned();
+    let mut config_behavior_hash = BotConfig::embedded_behavior_hash().to_owned();
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
@@ -198,7 +201,8 @@ fn parse_args() -> Result<ExportConfig, Box<dyn Error>> {
             "--git-sha" => git_sha = args.next().ok_or("missing value for --git-sha")?,
             "--config" => {
                 let path = args.next().ok_or("missing value for --config")?;
-                config_hash = hash_config_file(&path)?;
+                config_artifact_hash = artifact_hash_file(&path)?;
+                config_behavior_hash = behavior_hash_file(&path)?;
                 bot_config = BotConfig::load(path)?;
             }
             _ => return Err(format!("unknown arg: {arg}").into()),
@@ -230,6 +234,7 @@ fn parse_args() -> Result<ExportConfig, Box<dyn Error>> {
         num_shards,
         git_sha,
         bot_config,
-        config_hash,
+        config_artifact_hash,
+        config_behavior_hash,
     })
 }

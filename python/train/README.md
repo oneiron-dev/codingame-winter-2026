@@ -8,7 +8,9 @@ This directory is the local, W&B-free training side of the Rust search/value pip
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
+  "config_artifact_hash": "....",
+  "config_behavior_hash": "....",
   "seed": 1,
   "game_id": "seed-1-league-4",
   "turn": 0,
@@ -32,6 +34,8 @@ This directory is the local, W&B-free training side of the Rust search/value pip
 - `scalars` is an auxiliary feature vector
 - `value` is the normalized final score target in `[-1, 1]`
 - `encoded_view_hash` is the dedup key used before grouped train/validation splitting
+- `config_artifact_hash` tracks the exact file bytes used to build/export a run
+- `config_behavior_hash` tracks only `eval + search` semantics and is the strategy identity key
 - `chosen_action_id`, `joint_action_count`, and `root_values` are the compact search targets for later policy distillation
 
 ## Main entry points
@@ -132,7 +136,8 @@ python -m python.train.java_smoke \
 Notes:
 
 - Arena is the strength authority. Java smoke is the real I/O canary.
-- Java smoke now verifies that the built bot artifact embeds the same candidate config hash that arena evaluated.
+- Java smoke now verifies that the built bot artifact embeds the same candidate artifact and behavior hashes that arena evaluated.
+- `run_arena` treats candidate/incumbent behavior self-matches as informational no-ops instead of pretending they are meaningful arena results.
 - Both scripts use release-mode Rust binaries.
 
 ## Notes
