@@ -15,6 +15,7 @@ DEFAULT_MODEL = {
     "enabled": False,
     "architecture": "tiny_hybrid_v1",
     "conv_channels": 8,
+    "num_conv_layers": 2,
     "prior_mix": 0.0,
     "leaf_mix": 0.0,
     "value_scale": 48.0,
@@ -28,11 +29,18 @@ DEFAULT_MODEL = {
     "executor": "local",
     "gpu": "L40S",
     "max_samples": 0,
+    "training_mode": "standard",
+    "distill_alpha": 0.5,
+    "distill_temperature": 3.0,
+    "teacher_model_path": None,
+    "teacher_conv_channels": 128,
+    "teacher_num_res_blocks": 8,
 }
 
 DEFAULT_DATA = {
     "dataset_path": "python/train/data/selfplay.jsonl",
     "generate_dataset": False,
+    "shared_dataset_id": None,
     "seed_start": 1,
     "seed_count": 64,
     "league": 4,

@@ -406,3 +406,37 @@ This is still progress. The failure mode is now strategic:
 
 - the loop can produce aggressive hybrid candidates
 - the remaining problem is robustness/generalization across opponent baselines, not basic execution
+
+## Modal Volume migration and reliability improvements (2026-03-13)
+
+The hybrid05 batch (8 candidates) stalled because all candidates got through self-play but Modal training failed with aiohttp/SSL/broken pipe errors. Root cause: datasets (40MB-2.3GB) were transferred as gzip+base64 strings inside JSON function parameters.
+
+Changes:
+
+1. **Modal Volume**: Added `modal.Volume.from_name("snakebot-datasets", create_if_missing=True)` mounted at `/data` on all Modal functions. Selfplay writes dataset to Volume; training reads from Volume. Base64 blob transfer kept as fallback for small local datasets.
+2. **Retry logic**: All `.remote()` calls wrapped in `_retry_remote()` with exponential backoff + jitter (3 retries), catching ConnectionError, OSError, TimeoutError, and modal.exception.Error.
+3. **Volume-based data flow**: Selfplay → Volume → Training → Volume → Screening, avoiding repeated serialization of large datasets.
+
+## Shared dataset architecture (2026-03-13)
+
+All 8 candidates in hybrid05 generated redundant self-play data from the same 6/8/3/3 config. This was an 8x waste of compute.
+
+Changes:
+
+1. **`build_shared_dataset()`** in `build_dataset.py`: generates one big self-play dataset (500+ seeds) per run, writes to a well-known path.
+2. **`--shared-dataset` CLI arg** in `run_candidate.py`: when provided, skips per-candidate self-play and uses shared data.
+3. **`shared_dataset_id`** in genome DEFAULT_DATA: when set, candidates use existing shared data.
+4. **Outerloop prose**: added conditional shared dataset step before parallel candidate loop.
+
+## Teacher-student distillation pipeline (2026-03-13)
+
+New training modes: `"standard"` (existing), `"teacher"`, `"distill"`.
+
+Components:
+
+- **TeacherHybridNet**: 128ch, 8 SE-res blocks (~2-3M params). Stem conv → BN → 8×(conv→BN→ReLU→conv→BN→SE→skip→ReLU) → pool → heads. Two-head MLP policy (128→20) and value (64→1).
+- **Teacher training**: `train_teacher_from_spec()` with cosine LR schedule, 20 epochs. Saves to Volume for cross-function access.
+- **Soft target generation**: `generate_soft_targets()` runs teacher inference over dataset, writes augmented JSONL with `teacher_policy_logits` (shape [4][5]) and `teacher_value` (float) per row.
+- **Distillation training**: `train_distill_from_spec()` with combined loss: `T²·KL(student/T, teacher/T) + 1.5·MSE(student_value, teacher_value) + α·CE(student_policy, hard_targets)`.
+- **Modal functions**: `train_teacher_l40s` and `generate_soft_targets_l40s` on L40S GPU with Volume mount.
+- **Student improvements**: Optional 3rd conv layer (num_conv_layers=3) for 7x7 receptive field. Flat-array Rust inference for 2-3x speedup.

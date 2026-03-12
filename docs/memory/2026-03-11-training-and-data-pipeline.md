@@ -131,6 +131,52 @@ python3 -m python.train.parallel_selfplay \
 
 That exported `160` rows and completed an `mps` training smoke.
 
+## Distillation pipeline (2026-03-13)
+
+New training modes added to the hybrid path:
+
+### Training modes
+
+- **`standard`** (default): Direct supervised training on self-play data. Cross-entropy for policy, SmoothL1 for value. Existing behavior.
+- **`teacher`**: Train a larger TeacherHybridNet (128ch, 8 SE-res blocks, ~2-3M params) with cosine LR schedule. Never exported to Rust. Used only for generating soft targets.
+- **`distill`**: Train student (TinyHybridNet) using combined KL+MSE loss from teacher soft targets plus hard CE loss from ground truth.
+
+### Distillation loss
+
+```
+L = T² · KL(softmax(student/T), softmax(teacher/T))
+  + 1.5 · MSE(student_value, teacher_value)
+  + α · CE(student_policy, hard_targets)
+```
+
+Hyperparameter ranges: T ∈ {2, 3, 5}, α ∈ {0.3, 0.5, 0.7}.
+
+### Soft target generation
+
+`generate_soft_targets()` runs teacher inference over the full dataset and writes augmented JSONL with `teacher_policy_logits` (shape [4][5]) and `teacher_value` (float) per row. Uses `HybridDistillDataset` which extends `HybridSelfPlayDataset` to also return these teacher fields.
+
+### Student improvements
+
+- Optional 3rd conv layer (`num_conv_layers=3`): receptive field 5x5 → 7x7
+- Flat-array Rust inference: `Vec<f32>` with stride indexing instead of `Vec<Vec<Vec<f32>>>`
+- 1x1 kernel support in Rust for future bottleneck architectures
+- Schema v2 for 3-layer models; Rust accepts both v1 and v2
+
+### Pipeline flow (orchestrated by outerloop.prose)
+
+1. Generate shared self-play dataset (500+ seeds, one per run)
+2. Train teacher on shared dataset (Modal GPU)
+3. Generate soft targets from teacher (Modal GPU)
+4. Train N distilled students in parallel (Modal GPU)
+5. Screen students via arena (Modal CPU)
+6. Authoritative stage-2 locally
+
+### Modal functions
+
+- `train_teacher_l40s`: trains teacher, saves checkpoint to Volume
+- `generate_soft_targets_l40s`: loads teacher from Volume, writes augmented dataset to Volume
+- `train_l40s`: detects `training_mode: “distill”` and dispatches to distillation path
+
 ## Current caveats
 
 - Small smoke datasets can still produce tiny validation sets, so training metrics from those runs are only sanity checks.

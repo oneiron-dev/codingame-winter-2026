@@ -107,6 +107,7 @@ Detailed follow-up docs:
 
 - Pre-promotion live CodinGame result from the prior submission: global rank `168 / 1108`, Bronze rank `168 / 1108`
 - Post-promotion live CodinGame result for the promoted `6/8/3/3` submission: global rank `147 / 1108`, Bronze rank `147 / 1108`, score `29.57`
+- Latest live read (2026-03-13): global rank `108 / 1388`, Silver league (108th / 763 Silver). League promotion achieved with search-only 6/8/3/3 bot.
 - Net live change after the first real promotion: `+21` leaderboard places and `29.57` as the recorded comparison score for this submission
 - Clean authoritative confirmations run after the interrupted sweep:
   - `sweep_tmy4_topp4_cmy5_copp5_lat40_lat38`: rejected, heldout body diff `-0.830078125`

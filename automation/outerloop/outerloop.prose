@@ -31,24 +31,32 @@ loop until **a candidate is promoted or max_generations is exhausted** (max: 20)
   let offspring = session: planner
     prompt: "Propose the next set of candidate genomes for run {run_id} using base {genome_path}"
 
-  parallel (on-fail: "continue"):
+  # If any hybrid candidates need training, generate a shared dataset once
+  let shared_dataset = session: worker
+    prompt: "If any candidates in {offspring} have model.enabled=True and data.generate_dataset=True, generate a shared self-play dataset for run {run_id} with 500+ seeds using build_shared_dataset. Otherwise skip."
+    context: offspring
+
+  # If distillation is requested: train teacher on shared dataset, then generate soft targets
+  let teacher = session: worker
+    prompt: "If any candidates have model.training_mode='distill', train a teacher model on the shared dataset via launch_modal('train-teacher', ...). Otherwise skip."
+    context: offspring, shared_dataset
+
+  let augmented = session: worker
+    prompt: "If a teacher was trained, generate soft targets via launch_modal('generate-soft-targets', ...) to create an augmented dataset with teacher_policy_logits and teacher_value fields. Otherwise skip."
+    context: teacher, shared_dataset
+
+  parallel for candidate in offspring (on-fail: "continue"):
     session: worker
-      prompt: "Run stage0+stage1 for the first proposed candidate"
-      context: offspring
-    session: worker
-      prompt: "Run stage0+stage1 for the second proposed candidate"
-      context: offspring
-    session: worker
-      prompt: "Run stage0+stage1 for the third proposed candidate"
-      context: offspring
+      prompt: "Run stage0+stage1 for candidate {candidate}. If a shared dataset was generated, pass --shared-dataset to run_candidate.py. If augmented dataset exists and candidate uses distillation, use the augmented dataset path."
+      context: offspring, shared_dataset, augmented
 
   let finalists = session: evaluator
     prompt: "Select the strongest screening candidates and request authoritative evaluation"
     context: offspring
 
-  parallel (on-fail: "continue"):
+  parallel for finalist in finalists (on-fail: "continue"):
     session: worker
-      prompt: "Run stage2 authoritative evaluation for each finalist"
+      prompt: "Run stage2 authoritative evaluation for {finalist}"
       context: finalists
 
   let verdict = session: evaluator

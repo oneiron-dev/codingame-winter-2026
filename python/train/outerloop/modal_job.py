@@ -69,6 +69,7 @@ image = (
 )
 
 app = modal.App("snakebot-outerloop")
+vol = modal.Volume.from_name("snakebot-datasets", create_if_missing=True)
 
 
 def _repo_env() -> dict[str, str]:
@@ -99,7 +100,15 @@ def _train_impl(spec_json: str) -> dict:
         tmpdir_path = Path(tmpdir)
         output_dir = tmpdir_path / "model"
         spec["output_dir"] = str(output_dir)
-        if "dataset_jsonl_gz_b64" in spec:
+        if "volume_dataset_path" in spec:
+            # Prefer reading dataset from shared Volume (avoids base64 serialisation).
+            vol.reload()
+            vol_src = Path(spec.pop("volume_dataset_path"))
+            dataset_path = tmpdir_path / "dataset.jsonl"
+            dataset_path.write_bytes(vol_src.read_bytes())
+            spec.pop("dataset_jsonl_gz_b64", None)
+            spec["dataset_path"] = str(dataset_path)
+        elif "dataset_jsonl_gz_b64" in spec:
             dataset_path = tmpdir_path / "dataset.jsonl"
             dataset_path.write_bytes(
                 gzip.decompress(base64.b64decode(spec.pop("dataset_jsonl_gz_b64")))
@@ -109,9 +118,13 @@ def _train_impl(spec_json: str) -> dict:
             spec["dataset_path"] = _repo_relative_remote(spec["dataset_path"])
 
         from python.train.outerloop.export_weights import export_weights
-        from python.train.outerloop.train_model import train_from_spec
+        from python.train.outerloop.train_model import train_distill_from_spec, train_from_spec
 
-        metrics = train_from_spec(spec)
+        training_mode = spec.get("training_mode", "standard")
+        if training_mode == "distill":
+            metrics = train_distill_from_spec(spec)
+        else:
+            metrics = train_from_spec(spec)
         weights_path = output_dir / "hybrid_weights.json"
         weights_payload = export_weights(
             Path(metrics["model_path"]),
@@ -190,10 +203,21 @@ def _selfplay_impl(spec_json: str) -> dict:
                 f"stderr:\n{completed.stderr}"
             )
         payload = json.loads(completed.stdout)
-        compressed = base64.b64encode(gzip.compress(dataset_path.read_bytes())).decode("ascii")
+        dataset_bytes = dataset_path.read_bytes()
+        compressed = base64.b64encode(gzip.compress(dataset_bytes)).decode("ascii")
         payload["task"] = "selfplay"
         payload["dataset_jsonl_gz_b64"] = compressed
         payload["dataset_path"] = spec["dataset_path"]
+
+        # Also persist dataset to shared Volume for reliable cross-function access.
+        run_id = spec.get("run_id", "unknown")
+        candidate_id = spec.get("candidate_id", "unknown")
+        vol_dataset_path = f"/data/{run_id}/{candidate_id}/dataset.jsonl"
+        Path(vol_dataset_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(vol_dataset_path).write_bytes(dataset_bytes)
+        vol.commit()
+        payload["volume_dataset_path"] = vol_dataset_path
+
         return payload
 
 
@@ -283,6 +307,7 @@ def _arena_screen_impl(spec_json: str) -> dict:
     memory=32768,
     timeout=60 * 60,
     max_containers=16,
+    volumes={"/data": vol},
 )
 def train_l40s(spec_json: str) -> dict:
     return _train_impl(spec_json)
@@ -348,6 +373,7 @@ def train_l40s(spec_json: str) -> dict:
     memory=32768,
     timeout=60 * 60,
     max_containers=32,
+    volumes={"/data": vol},
 )
 def run_selfplay(spec_json: str) -> dict:
     return _selfplay_impl(spec_json)
@@ -359,9 +385,119 @@ def run_selfplay(spec_json: str) -> dict:
     memory=32768,
     timeout=60 * 60,
     max_containers=32,
+    volumes={"/data": vol},
 )
 def run_arena_screen(spec_json: str) -> dict:
     return _arena_screen_impl(spec_json)
+
+
+def _train_teacher_impl(spec_json: str) -> dict:
+    sys.path.insert(0, str(REMOTE_REPO))
+    spec = json.loads(spec_json)
+    spec = dict(spec)
+
+    with tempfile.TemporaryDirectory(prefix="snakebot-teacher-") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        output_dir = tmpdir_path / "teacher"
+        spec["output_dir"] = str(output_dir)
+        # Resolve dataset from Volume or fallback
+        if "volume_dataset_path" in spec:
+            vol.reload()
+            vol_src = Path(spec.pop("volume_dataset_path"))
+            dataset_path = tmpdir_path / "dataset.jsonl"
+            dataset_path.write_bytes(vol_src.read_bytes())
+            spec["dataset_path"] = str(dataset_path)
+        else:
+            spec["dataset_path"] = _repo_relative_remote(spec["dataset_path"])
+
+        from python.train.outerloop.train_model import train_teacher_from_spec
+
+        metrics = train_teacher_from_spec(spec)
+        # Save teacher model to Volume for later use
+        model_path = Path(metrics["model_path"])
+        config_path = Path(metrics["training_config_path"])
+        run_id = spec.get("run_id", "default")
+        vol_teacher_dir = Path(f"/data/{run_id}/teacher")
+        vol_teacher_dir.mkdir(parents=True, exist_ok=True)
+        (vol_teacher_dir / "teacher_model.pt").write_bytes(model_path.read_bytes())
+        (vol_teacher_dir / "teacher_training_config.json").write_text(
+            config_path.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        vol.commit()
+        metrics["volume_model_path"] = str(vol_teacher_dir / "teacher_model.pt")
+        metrics["volume_config_path"] = str(vol_teacher_dir / "teacher_training_config.json")
+        return {"task": "train-teacher", "metrics": metrics}
+
+
+def _generate_soft_targets_impl(spec_json: str) -> dict:
+    sys.path.insert(0, str(REMOTE_REPO))
+    spec = json.loads(spec_json)
+    spec = dict(spec)
+
+    with tempfile.TemporaryDirectory(prefix="snakebot-softtargets-") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        vol.reload()
+        # Resolve teacher model
+        if "volume_teacher_model_path" in spec:
+            teacher_model_path = tmpdir_path / "teacher_model.pt"
+            teacher_model_path.write_bytes(Path(spec["volume_teacher_model_path"]).read_bytes())
+            spec["teacher_model_path"] = str(teacher_model_path)
+        if "volume_teacher_config_path" in spec:
+            teacher_config_path = tmpdir_path / "teacher_training_config.json"
+            teacher_config_path.write_text(
+                Path(spec["volume_teacher_config_path"]).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            spec["teacher_training_config_path"] = str(teacher_config_path)
+        # Resolve dataset
+        if "volume_dataset_path" in spec:
+            dataset_path = tmpdir_path / "dataset.jsonl"
+            dataset_path.write_bytes(Path(spec.pop("volume_dataset_path")).read_bytes())
+            spec["dataset_path"] = str(dataset_path)
+        else:
+            spec["dataset_path"] = _repo_relative_remote(spec["dataset_path"])
+
+        output_path = tmpdir_path / "augmented_dataset.jsonl"
+        spec["output_path"] = str(output_path)
+
+        from python.train.outerloop.train_model import generate_soft_targets
+
+        result = generate_soft_targets(spec)
+        # Write augmented dataset to Volume
+        run_id = spec.get("run_id", "default")
+        vol_out = Path(f"/data/{run_id}/augmented/dataset.jsonl")
+        vol_out.parent.mkdir(parents=True, exist_ok=True)
+        vol_out.write_bytes(output_path.read_bytes())
+        vol.commit()
+        result["volume_augmented_path"] = str(vol_out)
+        result["task"] = "generate-soft-targets"
+        return result
+
+
+@app.function(
+    image=image,
+    gpu="L40S",
+    cpu=4.0,
+    memory=32768,
+    timeout=60 * 60,
+    max_containers=8,
+    volumes={"/data": vol},
+)
+def train_teacher_l40s(spec_json: str) -> dict:
+    return _train_teacher_impl(spec_json)
+
+
+@app.function(
+    image=image,
+    gpu="L40S",
+    cpu=4.0,
+    memory=32768,
+    timeout=60 * 60,
+    max_containers=8,
+    volumes={"/data": vol},
+)
+def generate_soft_targets_l40s(spec_json: str) -> dict:
+    return _generate_soft_targets_impl(spec_json)
 
 
 def _decode_dataset_payload(payload: dict, *, preserve_blob: bool = False) -> dict:
@@ -405,5 +541,11 @@ def main(task: str, spec_json: str) -> str:
         return json.dumps(_decode_dataset_payload(result), indent=2, sort_keys=True)
     if task == "arena-screen":
         result = run_arena_screen.remote(spec_json)
+        return json.dumps(result, indent=2, sort_keys=True)
+    if task == "train-teacher":
+        result = train_teacher_l40s.remote(spec_json)
+        return json.dumps(result, indent=2, sort_keys=True)
+    if task == "generate-soft-targets":
+        result = generate_soft_targets_l40s.remote(spec_json)
         return json.dumps(result, indent=2, sort_keys=True)
     raise ValueError(f"unsupported modal task: {task}")

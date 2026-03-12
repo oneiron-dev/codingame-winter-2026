@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
         choices=("local", "modal-arena-screen"),
         default=None,
     )
+    parser.add_argument("--shared-dataset", type=Path, default=None, help="Path to shared dataset; skips per-candidate self-play")
     parser.add_argument("--keep-worktree", action="store_true")
     return parser.parse_args()
 
@@ -116,6 +117,7 @@ def maybe_train_hybrid(
     candidate_dir: Path,
     config_path: Path,
     worktree: Path,
+    shared_dataset_path: Path | None = None,
 ) -> dict[str, Any] | None:
     if not genome.model.get("enabled"):
         return None
@@ -125,20 +127,27 @@ def maybe_train_hybrid(
     modal_config_path = modal_dir / "candidate_config.json"
     shutil.copy2(config_path, modal_config_path)
 
-    dataset_spec = {
-        "executor": genome.data.get("executor", "local"),
-        "seed_start": genome.data["seed_start"],
-        "seed_count": genome.data["seed_count"],
-        "league": genome.data["league"],
-        "workers": genome.data["workers"],
-        "max_turns": genome.data["max_turns"],
-        "extra_nodes_after_root": genome.data["extra_nodes_after_root"],
-        "config_path": str(modal_config_path),
-        "config_json": modal_config_path.read_text(encoding="utf-8"),
-        "dataset_path": str(modal_dir / "dataset.jsonl"),
-        "output_dir": str(modal_dir / "dataset_artifacts"),
-    }
-    if genome.data.get("generate_dataset"):
+    dataset_payload: dict[str, Any] = {}
+    if shared_dataset_path is not None:
+        # Use shared dataset — skip per-candidate self-play
+        dataset_path = str(shared_dataset_path.resolve())
+    elif genome.data.get("shared_dataset_id"):
+        # Shared dataset ID set in genome — resolve path
+        dataset_path = str((REPO_ROOT / genome.data["dataset_path"]).resolve())
+    elif genome.data.get("generate_dataset"):
+        dataset_spec = {
+            "executor": genome.data.get("executor", "local"),
+            "seed_start": genome.data["seed_start"],
+            "seed_count": genome.data["seed_count"],
+            "league": genome.data["league"],
+            "workers": genome.data["workers"],
+            "max_turns": genome.data["max_turns"],
+            "extra_nodes_after_root": genome.data["extra_nodes_after_root"],
+            "config_path": str(modal_config_path),
+            "config_json": modal_config_path.read_text(encoding="utf-8"),
+            "dataset_path": str(modal_dir / "dataset.jsonl"),
+            "output_dir": str(modal_dir / "dataset_artifacts"),
+        }
         dataset_spec_path = candidate_dir / "dataset_spec.json"
         dataset_spec_path.write_text(json.dumps(dataset_spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         dataset_payload = run_json(
@@ -150,7 +159,8 @@ def maybe_train_hybrid(
         dataset_path = str((REPO_ROOT / genome.data["dataset_path"]).resolve())
 
     model_dir = candidate_dir / "model"
-    train_spec = {
+    training_mode = genome.model.get("training_mode", "standard")
+    train_spec: dict[str, Any] = {
         "dataset_path": dataset_path,
         "output_dir": str(model_dir),
         "device_preference": genome.model.get("device_preference", "mps"),
@@ -161,9 +171,14 @@ def maybe_train_hybrid(
         "weight_decay": genome.model.get("weight_decay", 1e-4),
         "max_samples": genome.model.get("max_samples", 0),
         "conv_channels": genome.model.get("conv_channels", 8),
+        "num_conv_layers": genome.model.get("num_conv_layers", 2),
+        "training_mode": training_mode,
         "seed": 42,
         "policy_loss_weight": 1.0,
     }
+    if training_mode == "distill":
+        train_spec["distill_alpha"] = genome.model.get("distill_alpha", 0.5)
+        train_spec["distill_temperature"] = genome.model.get("distill_temperature", 3.0)
     if "dataset_jsonl_gz_b64" in dataset_payload:
         train_spec["dataset_jsonl_gz_b64"] = dataset_payload["dataset_jsonl_gz_b64"]
     executor = genome.model.get("executor", "local")
@@ -188,6 +203,7 @@ def maybe_train_hybrid(
              "--weight-decay", str(train_spec["weight_decay"]),
              "--max-samples", str(train_spec["max_samples"]),
              "--conv-channels", str(train_spec["conv_channels"]),
+             "--num-conv-layers", str(train_spec["num_conv_layers"]),
              "--seed", str(train_spec["seed"]),
              "--policy-loss-weight", str(train_spec["policy_loss_weight"])],
             cwd=worktree,
@@ -380,7 +396,13 @@ def main() -> None:
     try:
         cargo_build("-p", "snakebot-bot", "--bin", "snakebot-bot", cwd=worktree)
         cargo_build("-p", "snakebot-bot", "--bin", "arena", cwd=worktree)
-        training = maybe_train_hybrid(genome, candidate_dir=candidate_dir, config_path=config_path, worktree=worktree)
+        training = maybe_train_hybrid(
+            genome,
+            candidate_dir=candidate_dir,
+            config_path=config_path,
+            worktree=worktree,
+            shared_dataset_path=args.shared_dataset,
+        )
         if training is not None:
             stage0_payload["training"] = training
             write_stage_result(args.run_id, candidate_id, "stage0", stage0_payload)

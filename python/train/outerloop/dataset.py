@@ -58,6 +58,25 @@ def dedup_rows(rows: list[dict]) -> list[dict]:
     return deduped
 
 
+class HybridDistillDataset(HybridSelfPlayDataset):
+    """Extends HybridSelfPlayDataset with teacher soft targets for distillation."""
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        row = self.rows[index]
+        item = {
+            "grid": torch.tensor(row["hybrid_grid"], dtype=torch.float32),
+            "scalars": torch.tensor(row.get("scalars", []), dtype=torch.float32),
+            "value": torch.tensor([row["value"]], dtype=torch.float32),
+            "policy_targets": torch.tensor(row.get("policy_targets", [-100, -100, -100, -100]), dtype=torch.long),
+            "weight": torch.tensor([row.get("weight", 1.0)], dtype=torch.float32),
+        }
+        if "teacher_policy_logits" in row:
+            item["teacher_policy_logits"] = torch.tensor(row["teacher_policy_logits"], dtype=torch.float32)
+        if "teacher_value" in row:
+            item["teacher_value"] = torch.tensor([row["teacher_value"]], dtype=torch.float32)
+        return item
+
+
 def grouped_split_indices(rows: list[dict], train_split: float, seed: int) -> tuple[list[int], list[int]]:
     grouped: dict[tuple[int, str], list[int]] = defaultdict(list)
     for index, row in enumerate(rows):
