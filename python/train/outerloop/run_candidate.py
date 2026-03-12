@@ -223,11 +223,12 @@ def run_stage1(
     candidate_dir: Path,
     config_path: Path,
     genome_hash: str,
+    stage1_executor: str,
     args: argparse.Namespace,
     worktree: Path,
 ) -> dict[str, Any]:
     started_at = iso_now()
-    executor = args.stage1_executor or str(genome.metadata.get("stage1_executor", "local"))
+    executor = stage1_executor
     if executor == "modal-arena-screen":
         suite_text = None
         try:
@@ -384,6 +385,7 @@ def main() -> None:
                 candidate_dir=candidate_dir,
                 config_path=config_path,
                 genome_hash=genome.semantic_hash,
+                stage1_executor=args.stage1_executor or str(genome.metadata.get("stage1_executor", "local")),
                 args=args,
                 worktree=worktree,
             )

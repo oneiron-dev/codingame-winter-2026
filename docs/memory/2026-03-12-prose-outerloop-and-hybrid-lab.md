@@ -302,3 +302,63 @@ So the hybrid branch is now in the right failure mode:
 - plumbing works
 - timing is under control
 - the remaining problem is strength, not integration correctness
+
+## Modal crash-loop root cause and fix
+
+During the first Prose-native hybrid generation retry, Modal showed a `crash-looping` app state with `0 calls` and `1 input`.
+
+The root cause was not model instability. It was the Modal worker bootstrap:
+
+- inside the container, the worker module was imported as `/root/modal_job.py`
+- `python/train/outerloop/modal_job.py` was computing `REPO_ROOT` with `Path(__file__).resolve().parents[3]`
+- that works in the local repo tree but fails for `/root/modal_job.py` with `IndexError: 3`
+- the container died during import before any function call actually started
+
+This is now fixed:
+
+- repo-root detection in `modal_job.py` now searches upward for the actual repo structure instead of assuming a fixed parent depth
+- a direct `launch_modal("arena-screen", ...)` probe succeeded after the fix
+
+Probe result:
+
+- task: `arena-screen`
+- status: `screening`
+- heldout body diff: `+3.625`
+- later-turn `p99`: `42 ms`
+
+That probe is only a bootstrap check, not a meaningful strategic benchmark. Its purpose was to prove the Modal app no longer dies during import.
+
+## Current Prose-native hybrid run
+
+There is now an in-progress native Prose VM hybrid run:
+
+- run id: `20260312-183500-prose-hybrid02`
+
+Intent:
+
+- keep the current promoted `6/8/3/3` search bot as teacher/base
+- evaluate three root-prior-only hybrid offspring
+- use Modal CPU for self-play
+- use Modal GPU for training
+- use Modal CPU for stage-1 screening
+- keep stage 2 local and authoritative
+
+The first worker batch failed for two reasons:
+
+1. local bug in `run_candidate.py`
+   - `run_stage1()` referenced `genome.metadata` without receiving the genome/stage1 executor
+2. the Modal repo-root import bug described above
+
+Both issues are now fixed, and the same three offspring have been relaunched from the same run id.
+
+At the time of this note:
+
+- the run is active
+- the worker sessions are in progress
+- there are not yet stage-1 result artifacts for the restarted batch
+
+So the correct interpretation is:
+
+- Prose-native orchestration is still working
+- Modal is now healthy again
+- the next missing data is candidate strength, not more infrastructure debugging

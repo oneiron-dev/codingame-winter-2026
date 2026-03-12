@@ -14,7 +14,15 @@ from typing import Callable
 import modal
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+def _detect_repo_root() -> Path:
+    resolved = Path(__file__).resolve()
+    for candidate in (resolved.parent, *resolved.parents):
+        if (candidate / "automation").exists() and (candidate / "python").exists() and (candidate / "rust").exists():
+            return candidate
+    return resolved.parent
+
+
+REPO_ROOT = _detect_repo_root()
 REMOTE_REPO = Path("/root/repo")
 
 IGNORED_TOP_LEVEL = {
@@ -77,11 +85,9 @@ def _repo_relative_remote(path_value: str | Path | None) -> str | None:
     path = Path(path_value)
     if not path.is_absolute():
         return str(REMOTE_REPO / path)
-    try:
-        relative = path.resolve().relative_to(REPO_ROOT.resolve())
-    except ValueError:
+    if path.resolve().is_relative_to(REMOTE_REPO.resolve()):
         return str(path)
-    return str(REMOTE_REPO / relative)
+    return str(path)
 
 
 def _train_impl(spec_json: str) -> dict:
