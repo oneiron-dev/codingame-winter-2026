@@ -169,6 +169,52 @@ This matters because it proves the Prose runtime model is actually viable in thi
 - the existing repo CLIs are sufficient worker surfaces
 - Helios can treat that filesystem state as UI data instead of reimplementing workflow logic
 
+## Native Prose VM optimization run
+
+After the VM smoke run, the same in-session Prose model was used for one real optimization pass against the promoted live submission.
+
+Run state:
+
+- `.prose/runs/20260312-164032-a2d348/`
+
+Base target:
+
+- current submission `6/8/3/3`
+- search-only, not hybrid
+- hypothesis: a little more top-level breadth might beat the incumbent if timing stayed safe
+
+Planner output:
+
+- `search-37c207806429` = `6/9/3/3`
+- `search-cfb01bf6ba43` = `7/8/3/3`
+- `search-cf0e0f45226f` = `7/9/3/3 @ 42 ms`
+
+All three candidates were screened on the real smoke suite through `python.train.outerloop.run_candidate`.
+
+Screening result:
+
+- `search-37c207806429`
+  - heldout body diff `-3.078125`
+  - later-turn `p99 = 171 ms`
+- `search-cfb01bf6ba43`
+  - heldout body diff `-0.15625`
+  - later-turn `p99 = 173 ms`
+- `search-cf0e0f45226f`
+  - heldout body diff `-3.0625`
+  - later-turn `p99 = 164 ms`
+
+Evaluator verdict:
+
+- no finalists
+- no stage-2 authoritative rerun
+- no promotion
+
+The important lesson is not just “these candidates lost.” It is:
+
+- broadening the current `6/8/3/3` winner further is not a marginal tradeoff
+- in the current implementation it explodes later-turn cost far past the `45 ms` gate
+- the next search optimization should reduce root cost or schedule breadth more selectively, not simply add more top-level branches
+
 ## Important limitation
 
 The single-file CodinGame submission artifact is intentionally still search-only.
@@ -196,3 +242,63 @@ It is:
 1. keep the current promoted search bot as the live baseline
 2. use the new outer loop to search hybrid/search variants in a controlled way
 3. only consider a hybrid submission path once a hybrid candidate is actually strong enough and the one-file embedding problem is solved
+
+## Modal executor split now works
+
+The repo now has a validated three-way execution split:
+
+- Modal CPU: self-play shard generation
+- Modal GPU: tiny hybrid training
+- Local CPU: authoritative heldout/shadow arena plus Java smoke
+
+This keeps the expensive synthetic-data and training loops off the laptop without weakening the promotion gate.
+
+There is now also a dedicated stage-1 screening executor:
+
+- `modal-arena-screen`
+
+That executor runs screening arena jobs on Modal CPU while leaving stage 2 local and authoritative.
+
+Validated smoke run:
+
+- run id: `modal-stage1-smoke-2`
+- candidate: `search-a3734068c5ae`
+- executor: `modal-arena-screen`
+- suite: temporary 4-seed subset of `smoke_v1`
+- result: `screening`
+- heldout body diff: `-1.25`
+- shadow body diff: `+2.625`
+- later-turn `p99`: `42 ms`
+
+The result itself is not strategically important. What matters is that:
+
+- the candidate runner can now offload stage 1 to Modal CPU
+- the run manifest/stage artifact contract still works
+- authoritative stage 2 and Java smoke remain local only
+
+## Current hybrid read
+
+The first hybrid branch result that looked structurally sane is now clear:
+
+- tree-wide hybrid guidance was the wrong integration and caused catastrophic timing blowups
+- root-prior-only hybrid guidance is viable on timing
+
+Best screening signal so far:
+
+- candidate: `hybrid-e86e007498ec`
+- shape: 12-channel tiny model, root-only prior, `prior_mix = 0.12`, no leaf mix
+- tiny screen result: `heldout_body_diff = +1.125`, `later_turn_p99 = 41 ms`
+
+But the authoritative rerun on the real frozen suites was still rejected:
+
+- heldout body diff: `-1.337890625`
+- heldout win margin: `-0.091796875`
+- shadow body diff: `+7.603515625`
+- later-turn `p99`: `41 ms`
+- Java smoke: passed
+
+So the hybrid branch is now in the right failure mode:
+
+- plumbing works
+- timing is under control
+- the remaining problem is strength, not integration correctness

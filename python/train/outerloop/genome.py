@@ -18,12 +18,15 @@ DEFAULT_MODEL = {
     "prior_mix": 0.0,
     "leaf_mix": 0.0,
     "value_scale": 48.0,
+    "prior_depth_limit": 0,
+    "leaf_depth_limit": 0,
     "epochs": 4,
     "batch_size": 128,
     "learning_rate": 1e-3,
     "weight_decay": 1e-4,
     "device_preference": "mps",
     "executor": "local",
+    "gpu": "L40S",
     "max_samples": 0,
 }
 
@@ -162,6 +165,8 @@ def materialize_bot_config(
             "prior_mix": float(genome.model.get("prior_mix", 0.0)),
             "leaf_mix": float(genome.model.get("leaf_mix", 0.0)),
             "value_scale": float(genome.model.get("value_scale", 48.0)),
+            "prior_depth_limit": int(genome.model.get("prior_depth_limit", 0)),
+            "leaf_depth_limit": int(genome.model.get("leaf_depth_limit", 0)),
         }
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     Path(output_path).write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -30,17 +31,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shadow-suite", type=Path, default=REPO_ROOT / "config/arena/shadow_v1.txt")
     parser.add_argument("--results-db", type=Path, default=REPO_ROOT / "python/train/results.sqlite")
     parser.add_argument("--arena-bin", type=Path, default=None)
+    parser.add_argument(
+        "--stage1-executor",
+        choices=("local", "modal-arena-screen"),
+        default=None,
+    )
     parser.add_argument("--keep-worktree", action="store_true")
     return parser.parse_args()
 
 
-def run_json(command: list[str], *, cwd: Path = REPO_ROOT) -> dict[str, Any]:
-    output = subprocess.check_output(command, cwd=cwd, text=True)
+def run_json(command: list[str], *, cwd: Path = REPO_ROOT, stdin_text: str | None = None) -> dict[str, Any]:
+    output = subprocess.check_output(command, cwd=cwd, text=True, input=stdin_text)
     return json.loads(output)
 
 
 def cargo_build(*args: str, cwd: Path = REPO_ROOT) -> None:
     subprocess.run(["cargo", "build", "--release", "-q", *args], cwd=cwd, check=True)
+
+
+def repo_relative_string(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT.resolve()))
+    except ValueError:
+        return str(path)
 
 
 def stage0(
@@ -107,6 +120,11 @@ def maybe_train_hybrid(
     if not genome.model.get("enabled"):
         return None
 
+    modal_dir = worktree / ".outerloop_modal" / candidate_dir.name
+    modal_dir.mkdir(parents=True, exist_ok=True)
+    modal_config_path = modal_dir / "candidate_config.json"
+    shutil.copy2(config_path, modal_config_path)
+
     dataset_spec = {
         "executor": genome.data.get("executor", "local"),
         "seed_start": genome.data["seed_start"],
@@ -115,9 +133,10 @@ def maybe_train_hybrid(
         "workers": genome.data["workers"],
         "max_turns": genome.data["max_turns"],
         "extra_nodes_after_root": genome.data["extra_nodes_after_root"],
-        "config_path": str(config_path),
-        "dataset_path": str(candidate_dir / "dataset"),
-        "output_dir": str(candidate_dir / "dataset_artifacts"),
+        "config_path": str(modal_config_path),
+        "config_json": modal_config_path.read_text(encoding="utf-8"),
+        "dataset_path": str(modal_dir / "dataset.jsonl"),
+        "output_dir": str(modal_dir / "dataset_artifacts"),
     }
     if genome.data.get("generate_dataset"):
         dataset_spec_path = candidate_dir / "dataset_spec.json"
@@ -135,6 +154,7 @@ def maybe_train_hybrid(
         "dataset_path": dataset_path,
         "output_dir": str(model_dir),
         "device_preference": genome.model.get("device_preference", "mps"),
+        "gpu": genome.model.get("gpu", "L40S"),
         "epochs": genome.model.get("epochs", 4),
         "batch_size": genome.model.get("batch_size", 128),
         "learning_rate": genome.model.get("learning_rate", 1e-3),
@@ -144,6 +164,8 @@ def maybe_train_hybrid(
         "seed": 42,
         "policy_loss_weight": 1.0,
     }
+    if "dataset_jsonl_gz_b64" in dataset_payload:
+        train_spec["dataset_jsonl_gz_b64"] = dataset_payload["dataset_jsonl_gz_b64"]
     executor = genome.model.get("executor", "local")
     train_spec_path = candidate_dir / "train_spec.json"
     train_spec_path.write_text(json.dumps(train_spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -205,39 +227,72 @@ def run_stage1(
     worktree: Path,
 ) -> dict[str, Any]:
     started_at = iso_now()
-    payload = run_json(
-        [
-            "python3",
-            "-m",
-            "python.train.run_arena",
-            "--candidate-config",
-            str(config_path),
-            "--incumbent-config",
-            str(args.incumbent_config),
-            "--anchor-config",
-            str(args.anchor_config),
-            "--heldout-suite",
-            str(args.smoke_suite),
-            "--shadow-suite",
-            str(args.smoke_suite),
-            "--results-db",
-            str(args.results_db),
-            "--name",
-            f"{run_id}_{candidate_id}_stage1",
-            "--evaluation-mode",
-            "screening",
-            "--skip-java-smoke",
-        ]
-        + (["--arena-bin", str(args.arena_bin)] if args.arena_bin else []),
-        cwd=worktree,
-    )
+    executor = args.stage1_executor or str(genome.metadata.get("stage1_executor", "local"))
+    if executor == "modal-arena-screen":
+        suite_text = None
+        try:
+            relative_suite = args.smoke_suite.resolve().relative_to(REPO_ROOT.resolve())
+            suite_path = str(relative_suite)
+        except ValueError:
+            suite_path = None
+            suite_text = args.smoke_suite.read_text(encoding="utf-8")
+        modal_spec: dict[str, Any] = {
+            "candidate_config_json": config_path.read_text(encoding="utf-8"),
+            "incumbent_config_path": repo_relative_string(args.incumbent_config),
+            "anchor_config_path": repo_relative_string(args.anchor_config),
+            "suite_path": suite_path,
+            "suite_name": args.smoke_suite.stem,
+            "name": f"{run_id}_{candidate_id}_stage1",
+        }
+        if suite_text is not None:
+            modal_spec["suite_text"] = suite_text
+        payload = run_json(
+            [
+                "python3",
+                "-m",
+                "python.train.outerloop.launch_modal",
+                "--task",
+                "arena-screen",
+                "--spec",
+                "/dev/stdin",
+            ],
+            cwd=worktree,
+            stdin_text=json.dumps(modal_spec),
+        )
+    else:
+        payload = run_json(
+            [
+                "python3",
+                "-m",
+                "python.train.run_arena",
+                "--candidate-config",
+                str(config_path),
+                "--incumbent-config",
+                str(args.incumbent_config),
+                "--anchor-config",
+                str(args.anchor_config),
+                "--heldout-suite",
+                str(args.smoke_suite),
+                "--shadow-suite",
+                str(args.smoke_suite),
+                "--results-db",
+                str(args.results_db),
+                "--name",
+                f"{run_id}_{candidate_id}_stage1",
+                "--evaluation-mode",
+                "screening",
+                "--skip-java-smoke",
+            ]
+            + (["--arena-bin", str(args.arena_bin)] if args.arena_bin else []),
+            cwd=worktree,
+        )
     result = {
         "run_id": run_id,
         "candidate_id": candidate_id,
         "candidate_dir": str(candidate_dir),
         "stage": "stage1",
         "status": payload["status"],
-        "executor": "local",
+        "executor": executor,
         "started_at": started_at,
         "finished_at": iso_now(),
         "artifact_hash": artifact_hash(config_path),

@@ -17,6 +17,16 @@ from python.train.train_value import train
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def resolve_git_sha() -> str:
+    env_sha = os.environ.get("SNAKEBOT_GIT_SHA")
+    if env_sha:
+        return env_sha
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
+    except subprocess.CalledProcessError:
+        return "unknown"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed-start", type=int, default=1)
@@ -62,9 +72,21 @@ def ensure_java_oracle() -> Path:
     return Path(f"target/classes:target/test-classes:{classpath}")
 
 
-def build_exporter() -> Path:
+def exporter_command() -> list[str]:
+    if os.environ.get("SNAKEBOT_SELFPLAY_USE_CARGO_RUN") == "1":
+        return [
+            "cargo",
+            "run",
+            "--release",
+            "-q",
+            "-p",
+            "snakebot-bot",
+            "--bin",
+            "selfplay_export",
+            "--",
+        ]
     run(["cargo", "build", "--release", "-q", "-p", "snakebot-bot", "--bin", "selfplay_export"])
-    return REPO_ROOT / "target/release/selfplay_export"
+    return [str(REPO_ROOT / "target/release/selfplay_export")]
 
 
 def dump_maps(args: argparse.Namespace, classpath: Path) -> None:
@@ -88,7 +110,7 @@ def dump_maps(args: argparse.Namespace, classpath: Path) -> None:
         )
 
 
-def export_shards(args: argparse.Namespace, exporter_bin: Path) -> list[Path]:
+def export_shards(args: argparse.Namespace, exporter_cmd: list[str]) -> list[Path]:
     shard_dir = args.dataset_path.parent / f"{args.dataset_path.stem}_shards"
     if shard_dir.exists():
         shutil.rmtree(shard_dir)
@@ -99,15 +121,13 @@ def export_shards(args: argparse.Namespace, exporter_bin: Path) -> list[Path]:
     procs: list[tuple[int, subprocess.Popen[str], Path]] = []
     shard_paths: list[Path] = []
 
-    git_sha = (
-        subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
-    )
+    git_sha = resolve_git_sha()
 
     for shard_index in range(workers):
         shard_path = shard_dir / f"selfplay-{shard_index:03d}.jsonl"
         shard_paths.append(shard_path)
         cmd = [
-            str(exporter_bin),
+            *exporter_cmd,
             "--out",
             str(shard_path),
             "--limit",
@@ -222,13 +242,13 @@ def run_training(args: argparse.Namespace, sample_count: int) -> dict:
 
 def main() -> None:
     args = parse_args()
-    exporter_bin = build_exporter()
+    exporter_cmd = exporter_command()
     if args.reuse_maps and args.maps_path is None:
         raise ValueError("--reuse-maps requires --maps-path")
     if args.maps_path is not None:
         classpath = ensure_java_oracle()
         dump_maps(args, classpath)
-    shard_paths = export_shards(args, exporter_bin)
+    shard_paths = export_shards(args, exporter_cmd)
     shard_dir = args.dataset_path.parent / f"{args.dataset_path.stem}_shards"
     sample_count = count_samples(shard_paths)
 

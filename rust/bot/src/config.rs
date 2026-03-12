@@ -62,6 +62,10 @@ fn default_value_scale() -> f64 {
     48.0
 }
 
+fn default_hybrid_depth_limit() -> usize {
+    usize::MAX
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HybridConfig {
     #[serde(default)]
@@ -72,6 +76,10 @@ pub struct HybridConfig {
     pub leaf_mix: f64,
     #[serde(default = "default_value_scale")]
     pub value_scale: f64,
+    #[serde(default = "default_hybrid_depth_limit")]
+    pub prior_depth_limit: usize,
+    #[serde(default = "default_hybrid_depth_limit")]
+    pub leaf_depth_limit: usize,
 }
 
 impl Default for HybridConfig {
@@ -81,6 +89,8 @@ impl Default for HybridConfig {
             prior_mix: 0.0,
             leaf_mix: 0.0,
             value_scale: default_value_scale(),
+            prior_depth_limit: default_hybrid_depth_limit(),
+            leaf_depth_limit: default_hybrid_depth_limit(),
         }
     }
 }
@@ -207,6 +217,8 @@ fn hybrid_behavior_value(hybrid: &HybridConfig, config_dir: Option<&Path>) -> Va
         "prior_mix": hybrid.prior_mix,
         "leaf_mix": hybrid.leaf_mix,
         "value_scale": hybrid.value_scale,
+        "prior_depth_limit": hybrid.prior_depth_limit,
+        "leaf_depth_limit": hybrid.leaf_depth_limit,
         "weights": weights,
     })
 }

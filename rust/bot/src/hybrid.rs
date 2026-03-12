@@ -128,9 +128,15 @@ impl TinyHybridWeights {
     }
 
     fn forward(&self, grid: &[Vec<Vec<f32>>], scalars: &[f32]) -> HybridPrediction {
-        let conv1 = self.conv1.forward(grid, self.board_height, self.board_width);
-        let conv2 = self.conv2.forward(&conv1, self.board_height, self.board_width);
-        let pooled = global_average_pool(&conv2, self.board_height, self.board_width);
+        let height = grid.first().map(|channel| channel.len()).unwrap_or(0);
+        let width = grid
+            .first()
+            .and_then(|channel| channel.first())
+            .map(|row| row.len())
+            .unwrap_or(0);
+        let conv1 = self.conv1.forward(grid, height, width);
+        let conv2 = self.conv2.forward(&conv1, height, width);
+        let pooled = global_average_pool(&conv2, height, width);
         let mut features = pooled;
         features.extend_from_slice(scalars);
         let policy_logits = self.policy.forward(&features);
@@ -262,6 +268,8 @@ mod tests {
             prior_mix: 0.25,
             leaf_mix: 0.5,
             value_scale: 48.0,
+            prior_depth_limit: usize::MAX,
+            leaf_depth_limit: usize::MAX,
         });
         let state = initial_state_from_seed(1, 4);
         let prediction = predict(&state, 0, &config).expect("prediction should be available");

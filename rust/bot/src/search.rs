@@ -95,7 +95,7 @@ pub fn choose_action(
     let my_action_count = my_actions.len();
     let opp_action_count = opp_actions.len();
     let default_action = PlayerAction::default();
-    let root_prediction = predict(state, owner, config);
+    let root_prediction = prior_prediction(state, owner, config, 0);
 
     let mut my_order = (0..my_actions.len())
         .map(|idx| {
@@ -108,6 +108,7 @@ pub fn choose_action(
                     &default_action,
                     config,
                     root_prediction.as_ref(),
+                    0,
                 ),
             )
         })
@@ -125,6 +126,7 @@ pub fn choose_action(
                     &opp_actions[idx],
                     config,
                     None,
+                    0,
                 ),
             )
         })
@@ -157,7 +159,7 @@ pub fn choose_action(
             }
 
             let next = simulate_state(state, owner, &my_action, &opp_actions[opp_index]);
-            let score = evaluate(&next, owner, CONTEST_MAX_TURNS, &config.eval);
+            let score = evaluate_with_hybrid(&next, owner, config, 1);
             stats.root_pairs += 1;
             worst_score = worst_score.min(score);
             mean_score += score;
@@ -242,6 +244,7 @@ pub fn choose_action(
                 deadline,
                 &mut extra_nodes_remaining,
                 &mut stats,
+                1,
             );
             analysis.responses[response_index].score = child_score;
         }
@@ -290,11 +293,12 @@ fn deepen_branch(
     deadline: Option<Instant>,
     extra_nodes_remaining: &mut u64,
     stats: &mut SearchStats,
+    depth: usize,
 ) -> f64 {
     let my_actions = ordered_joint_actions(state, owner);
     let opp_actions = ordered_joint_actions(state, 1 - owner);
     let default_action = PlayerAction::default();
-    let root_prediction = predict(state, owner, config);
+    let root_prediction = prior_prediction(state, owner, config, depth);
 
     let mut my_order = (0..my_actions.len())
         .map(|idx| {
@@ -307,6 +311,7 @@ fn deepen_branch(
                     &default_action,
                     config,
                     root_prediction.as_ref(),
+                    depth,
                 ),
             )
         })
@@ -324,6 +329,7 @@ fn deepen_branch(
                     &opp_actions[idx],
                     config,
                     None,
+                    depth,
                 ),
             )
         })
@@ -350,7 +356,7 @@ fn deepen_branch(
             *extra_nodes_remaining -= 1;
             stats.extra_nodes += 1;
             let next = simulate_state(state, owner, &my_actions[my_index], &opp_actions[opp_index]);
-            let score = evaluate_with_hybrid(&next, owner, config);
+            let score = evaluate_with_hybrid(&next, owner, config, depth + 1);
             child_worst = child_worst.min(score);
         }
         if child_worst.is_finite() {
@@ -361,7 +367,7 @@ fn deepen_branch(
     if best_followup.is_finite() {
         best_followup
     } else {
-        evaluate_with_hybrid(state, owner, config)
+        evaluate_with_hybrid(state, owner, config, depth)
     }
 }
 
@@ -394,9 +400,10 @@ fn action_prior(
     opp_action: &PlayerAction,
     config: &BotConfig,
     prediction: Option<&HybridPrediction>,
+    depth: usize,
 ) -> f64 {
     let next = simulate_state(state, owner, my_action, opp_action);
-    let mut score = evaluate_with_hybrid(&next, owner, config);
+    let mut score = evaluate_with_hybrid(&next, owner, config, depth + 1);
     if let (Some(hybrid), Some(prediction)) = (config.hybrid.as_ref(), prediction) {
         if hybrid.prior_mix != 0.0 {
             score += hybrid.prior_mix * prediction.action_prior(state, owner, my_action);
@@ -420,16 +427,29 @@ fn simulate_state(
     next
 }
 
-fn evaluate_with_hybrid(state: &GameState, owner: usize, config: &BotConfig) -> f64 {
+fn evaluate_with_hybrid(state: &GameState, owner: usize, config: &BotConfig, depth: usize) -> f64 {
     let mut score = evaluate(state, owner, CONTEST_MAX_TURNS, &config.eval);
     if let Some(hybrid) = config.hybrid.as_ref() {
-        if hybrid.leaf_mix != 0.0 {
+        if hybrid.leaf_mix != 0.0 && depth <= hybrid.leaf_depth_limit {
             if let Some(prediction) = predict(state, owner, config) {
                 score += hybrid.leaf_mix * leaf_bonus(&prediction, hybrid);
             }
         }
     }
     score
+}
+
+fn prior_prediction(
+    state: &GameState,
+    owner: usize,
+    config: &BotConfig,
+    depth: usize,
+) -> Option<HybridPrediction> {
+    let hybrid = config.hybrid.as_ref()?;
+    if hybrid.prior_mix == 0.0 || depth > hybrid.prior_depth_limit {
+        return None;
+    }
+    predict(state, owner, config)
 }
 
 fn deadline_for_budget(started: Instant, budget: SearchBudget) -> Option<Instant> {
@@ -688,7 +708,7 @@ mod tests {
 
         let mut remaining = 128;
         let mut stats = super::SearchStats::default();
-        let actual = deepen_branch(&state, 0, &config, None, &mut remaining, &mut stats);
+        let actual = deepen_branch(&state, 0, &config, None, &mut remaining, &mut stats, 1);
         assert_eq!(actual, expected);
     }
 

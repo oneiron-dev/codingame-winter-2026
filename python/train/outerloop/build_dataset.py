@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def build_dataset(spec: dict) -> dict:
     executor = str(spec.get("executor", "local"))
     if executor == "modal-selfplay":
-        return launch_modal("selfplay", spec)
+        return launch_modal("selfplay", spec, preserve_selfplay_blob=True)
 
     command = [
         "python3",
